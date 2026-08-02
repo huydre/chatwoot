@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_07_29_051500) do
+ActiveRecord::Schema[7.1].define(version: 2026_08_02_000000) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -710,6 +710,16 @@ ActiveRecord::Schema[7.1].define(version: 2026_07_29_051500) do
     t.string "phone_number_health_error", limit: 500
     t.index ["phone_number_health_checked_at"], name: "index_channel_whatsapp_on_phone_number_health_checked_at"
     t.index ["phone_number"], name: "index_channel_whatsapp_on_phone_number", unique: true
+  end
+
+  create_table "channel_zalo_oa", force: :cascade do |t|
+    t.string "oa_id", null: false
+    t.string "access_token", null: false
+    t.string "refresh_token"
+    t.integer "account_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["oa_id"], name: "index_channel_zalo_oa_on_oa_id", unique: true
   end
 
   create_table "companies", force: :cascade do |t|

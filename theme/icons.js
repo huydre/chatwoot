@@ -289,6 +289,11 @@ export const icons = {
     width: 24,
     height: 24,
   },
+  zalo: {
+    body: `<g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.75c-4.694 0-8.5 3.234-8.5 7.222 0 2.31 1.278 4.365 3.264 5.68v3.098l3.008-1.7c.717.096 1.46.145 2.228.145 4.694 0 8.5-3.234 8.5-7.223S16.694 3.75 12 3.75Z"/><path d="M9.6 9.3h4.8l-4.8 4.8h4.8"/></g>`,
+    width: 24,
+    height: 24,
+  },
   messenger: {
     body: `<g fill="none" stroke="currentColor"><path d="M17.6568 6.34316C14.5326 3.21895 9.46735 3.21895 6.34314 6.34316C3.63893 9.04737 3.27537 13.2059 5.25266 16.3012L4.7839 18.709C4.72531 19.0099 4.99007 19.2747 5.29104 19.2161L7.69882 18.7473C10.7941 20.7246 14.9526 20.3611 17.6568 17.6569C20.7811 14.5326 20.7811 9.46736 17.6568 6.34316Z" stroke-width="1.6" stroke-linejoin="round"/><path d="M15.8218 10.624L13.2228 13.2231L10.853 10.8534L8.25391 13.4524" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></g>`,
     width: 24,
