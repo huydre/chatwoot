@@ -1,10 +1,19 @@
-import type { ZaloFactory, ZaloLike } from './zalo-login-flow.js';
-import * as zcaJs from 'zca-js';
+import type { API, Credentials } from 'zca-js';
+import { Zalo } from 'zca-js';
 
-// zca-js publishes its Zalo class via named export. TypeScript can't always
-// narrow the namespace import to the right constructor type due to its dual
-// CJS/ESM packaging, so we grab it through an unknown cast.
-const ZaloCtor = (zcaJs as unknown as { Zalo: new () => unknown }).Zalo;
+import type { ZaloFactory, ZaloLike } from './zalo-login-flow.js';
+
+/**
+ * Construction of the real zca-js client.
+ *
+ * `selfListen` is the important bit. Without it the listener drops every
+ * message the logged-in account sent — zca-js checks
+ * `if (messageObject.isSelf && !this.selfListen) continue;` — so anything the
+ * user typed in the Zalo app itself never reached Chatwoot, and the agent's
+ * own half of each conversation was missing. Chatwoot needs those events;
+ * the echo of a reply it sent is separated out later by source_id.
+ */
+const CLIENT_OPTIONS = { selfListen: true } as const;
 
 /**
  * Default ZaloFactory that returns a real zca-js `Zalo` instance.
@@ -16,10 +25,9 @@ const ZaloCtor = (zcaJs as unknown as { Zalo: new () => unknown }).Zalo;
  * login context on the instance itself — sharing across sessions would
  * cross-contaminate cookies.
  */
-
 export class DefaultZaloFactory implements ZaloFactory {
   create(): ZaloLike {
-    return new ZaloCtor() as ZaloLike;
+    return new Zalo(CLIENT_OPTIONS);
   }
 }
 
@@ -32,14 +40,9 @@ export async function reloginWithCredentials(credentials: {
   cookie: unknown;
   imei: string;
   userAgent: string;
-}): Promise<unknown> {
-  const zalo = new ZaloCtor() as {
-    login: (c: {
-      cookie: unknown;
-      imei: string;
-      userAgent: string;
-    }) => Promise<unknown>;
-  };
+}): Promise<API> {
+  const zalo = new Zalo(CLIENT_OPTIONS);
+
   // zca-js accepts cookie in several shapes (SerializedCookie[] | Cookie[] |
   // { url, cookies }). We pass whatever Rails stored and let the library
   // normalise internally.
@@ -47,5 +50,5 @@ export async function reloginWithCredentials(credentials: {
     cookie: credentials.cookie,
     imei: credentials.imei,
     userAgent: credentials.userAgent,
-  });
+  } as Credentials);
 }

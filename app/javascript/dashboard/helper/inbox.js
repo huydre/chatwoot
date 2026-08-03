@@ -11,6 +11,7 @@ export const INBOX_TYPES = {
   SMS: 'Channel::Sms',
   INSTAGRAM: 'Channel::Instagram',
   TIKTOK: 'Channel::Tiktok',
+  ZALO: 'Channel::Zalo',
 };
 
 // Short channel-type slugs used to identify a channel without leaning on its

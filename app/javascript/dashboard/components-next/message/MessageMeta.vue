@@ -21,6 +21,7 @@ const {
   isAnEmailChannel,
   isAnInstagramChannel,
   isATiktokChannel,
+  isAZaloChannel,
 } = useInbox();
 
 const {
@@ -62,7 +63,12 @@ const isSent = computed(() => {
     isASmsInbox.value ||
     isATelegramChannel.value ||
     isAnInstagramChannel.value ||
-    isATiktokChannel.value
+    isATiktokChannel.value ||
+    // Zalo reports no delivery or read receipts, so a source id plus `sent`
+    // is as far as it goes. Without this the checks below all fall through
+    // to PROGRESS and the bubble reads "Sending" forever, however well the
+    // send actually went.
+    isAZaloChannel.value
   ) {
     return sourceId.value && status.value === MESSAGE_STATUS.SENT;
   }
