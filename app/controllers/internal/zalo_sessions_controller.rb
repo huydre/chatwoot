@@ -9,6 +9,11 @@
 # cannot be pointed at a session the caller does not already know the
 # account of. Each call is logged for audit.
 class Internal::ZaloSessionsController < ActionController::API
+  # Raised when a reconnect lands on a different Zalo account than the inbox
+  # is linked to. Surfaced to the dashboard so the agent can see which account
+  # was expected instead of silently getting someone else's conversations.
+  class ZaloAccountMismatch < StandardError; end
+
   before_action :authenticate_zalo_service
   before_action :log_internal_call
   before_action :find_session, only: %i[show update destroy]
@@ -62,6 +67,8 @@ class Internal::ZaloSessionsController < ActionController::API
     render json: session.to_node_payload.merge(inbox_id: inbox.id), status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: 'validation_failed', details: e.record.errors.full_messages }, status: :unprocessable_entity
+  rescue ZaloAccountMismatch => e
+    render json: { error: 'zalo_account_mismatch', detail: e.message }, status: :conflict
   rescue ActiveRecord::RecordNotFound => e
     render json: { error: 'channel_not_found', detail: e.message }, status: :not_found
   rescue ActiveRecord::RecordNotUnique
@@ -115,9 +122,21 @@ class Internal::ZaloSessionsController < ActionController::API
     account_id = params[:account_id].presence
     raise ActiveRecord::RecordNotFound, 'account_id is required' if account_id.blank?
 
-    return Channel::Zalo.find_by!(id: params[:existing_channel_id], account_id: account_id) if params[:existing_channel_id].present?
+    return reconnected_channel(account_id) if params[:existing_channel_id].present?
 
     Channel::Zalo.find_or_initialize_by(zalo_own_id: params[:own_id], account_id: account_id)
+  end
+
+  # Reconnecting an existing inbox must land on the same Zalo account. Scanning
+  # the QR with a different phone used to be accepted silently — the channel
+  # kept the old zalo_own_id while the live session belonged to someone else,
+  # so that person's conversations flowed into this inbox (red team H7).
+  def reconnected_channel(account_id)
+    channel = Channel::Zalo.find_by!(id: params[:existing_channel_id], account_id: account_id)
+    scanned = params[:own_id].presence
+    return channel if channel.zalo_own_id.blank? || scanned.blank? || channel.zalo_own_id == scanned
+
+    raise ZaloAccountMismatch, "inbox is linked to #{channel.zalo_own_id}, but the QR was scanned with #{scanned}"
   end
 
   # Cookies arrive encrypted (see Zalo::TransportCipher) and are stored

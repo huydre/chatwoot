@@ -34,8 +34,8 @@ class Zalo::QrLoginService
 
   def status(session_id)
     authorize_session!(session_id)
-    cached = Rails.cache.read("zalo:qr:#{session_id}")
-    cached_status = Rails.cache.read("zalo:session_status:#{session_id}")
+    cached = Redis::Alfred.get(format(Redis::RedisKeys::ZALO_QR_CODE, session_id: session_id))
+    cached_status = Redis::Alfred.get(format(Redis::RedisKeys::ZALO_SESSION_STATUS, session_id: session_id))
 
     return { 'status' => 'qr_ready', 'qr_base64' => cached } if cached && cached_status != 'ready'
 
@@ -81,7 +81,7 @@ class Zalo::QrLoginService
   end
 
   def session_account_key(session_id)
-    "zalo:session_account:#{session_id}"
+    format(Redis::RedisKeys::ZALO_SESSION_ACCOUNT, session_id: session_id)
   end
 
   def node_client

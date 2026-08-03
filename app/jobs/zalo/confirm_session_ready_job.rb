@@ -1,7 +1,7 @@
 # Called when Node publishes session_ready after QR scan success.
 # Flips the DB session status, records own_id on the channel, and primes
-# the Rails cache so the frontend polling endpoint can short-circuit the
-# next status read.
+# Redis so the frontend polling endpoint can short-circuit the next status
+# read from whichever web worker happens to serve it.
 class Zalo::ConfirmSessionReadyJob < ApplicationJob
   queue_as :default
 
@@ -18,6 +18,10 @@ class Zalo::ConfirmSessionReadyJob < ApplicationJob
       )
     end
 
-    Rails.cache.write("zalo:session_status:#{session.session_id}", 'ready', expires_in: 5.minutes)
+    Redis::Alfred.setex(
+      format(Redis::RedisKeys::ZALO_SESSION_STATUS, session_id: session.session_id),
+      'ready',
+      5.minutes
+    )
   end
 end

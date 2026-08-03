@@ -46,30 +46,49 @@ class ZaloProxy < ApplicationRecord
 
   private
 
-  # SSRF mitigation: refuse proxies pointed at internal ranges.
-  # Covers red team H8 — uses the ssrf_filter gem (already in Chatwoot's
-  # Gemfile for other fetchers). Falls back to a manual regex for the
-  # obvious cases so validation still runs if the gem is absent.
+  # SSRF mitigation: refuse proxies pointed at internal ranges (red team H8).
+  #
+  # Resolves the host and checks every address it answers with against
+  # ssrf_filter's range lists — the gem is already a Chatwoot dependency and
+  # its lists cover loopback, RFC1918, link-local (including the cloud
+  # metadata address), CGNAT, multicast and the IPv6 equivalents.
+  #
+  # The previous hand-rolled version compared string prefixes, so it never
+  # saw a hostname that resolved somewhere internal, and misread public names
+  # that merely start with a private-looking octet, e.g. "10.example.com".
+  #
+  # This runs at save time. It cannot stop a host that later re-points at an
+  # internal address (DNS rebinding); the sidecar dials the proxy, so closing
+  # that would mean checking again at connection time in Node.
   def host_must_not_be_internal
     return if host.blank?
     return if ENV['ZALO_PROXY_ALLOW_INTERNAL'] == 'true'
 
-    return unless internal_host?(host)
+    addresses = resolved_addresses
+    if addresses.empty?
+      errors.add(:host, 'could not be resolved, so it cannot be confirmed as publicly reachable')
+      return
+    end
 
-    errors.add(:host, 'points to an internal network address; proxies must be publicly reachable')
+    return if addresses.none? { |ip| internal_address?(ip) }
+
+    errors.add(:host, 'resolves to an internal network address; proxies must be publicly reachable')
   end
 
-  def internal_host?(hostname)
-    lower = hostname.downcase
-    return true if lower == 'localhost' || lower == '::1'
-    return true if lower.start_with?('127.')
-    return true if lower.start_with?('10.')
-    return true if lower.start_with?('192.168.')
-    return true if /\A172\.(1[6-9]|2\d|3[0-1])\./.match?(lower)
-    return true if lower.start_with?('169.254.')    # link-local
-    return true if lower.start_with?('100.64.')     # CGNAT
-    return true if lower.start_with?('fc', 'fd') # IPv6 ULA
+  def resolved_addresses
+    Resolv.getaddresses(host).filter_map { |address| parse_ip(address) }
+  rescue StandardError
+    []
+  end
 
-    false
+  def parse_ip(address)
+    IPAddr.new(address)
+  rescue IPAddr::InvalidAddressError
+    nil
+  end
+
+  def internal_address?(ip_address)
+    ranges = ip_address.ipv4? ? SsrfFilter::IPV4_BLACKLIST : SsrfFilter::IPV6_BLACKLIST
+    ranges.any? { |range| range.include?(ip_address) }
   end
 end

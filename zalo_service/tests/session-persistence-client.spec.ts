@@ -8,13 +8,14 @@ describe('SessionPersistenceClient', () => {
     process.env.LOG_LEVEL = 'fatal';
   });
 
-  it('listActive returns [] on 404', async () => {
+  // null, not [] — an unreachable Rails must not look like "nothing to restore".
+  it('listActive returns null on 404', async () => {
     const fetchMock = vi.fn(async () =>
       new Response('{}', { status: 404 }),
     ) as unknown as typeof fetch;
     const client = new SessionPersistenceClient({ fetchImpl: fetchMock });
     const result = await client.listActive();
-    expect(result).toEqual([]);
+    expect(result).toBeNull();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -41,13 +42,13 @@ describe('SessionPersistenceClient', () => {
     expect(result).toEqual(rows);
   });
 
-  it('listActive returns [] on network error after retries', async () => {
+  it('listActive returns null on network error after retries', async () => {
     const fetchMock = vi.fn(async () => {
       throw new Error('ECONNREFUSED');
     }) as unknown as typeof fetch;
     const client = new SessionPersistenceClient({ fetchImpl: fetchMock });
     const result = await client.listActive();
-    expect(result).toEqual([]);
+    expect(result).toBeNull();
     // 3 attempts (initial + 2 retries)
     expect((fetchMock as unknown as { mock: { calls: unknown[] } }).mock.calls.length).toBe(3);
   }, 15_000);

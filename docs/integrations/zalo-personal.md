@@ -169,12 +169,36 @@ bundle exec rails runner "Zalo::CircuitBreaker.record_success('SID')"
 redis-cli get zalo:rate:SID
 ```
 
+## Scaling and restarts
+
+`zalo_listener` is safe to run on every Rails pod. All instances join the
+`chatwoot-rails` consumer group on the `zalo.events` Redis stream, so Redis
+hands each event to exactly one of them, and entries left unacked by a pod
+that died are reclaimed by another.
+
+`zalo` (the Node sidecar) is **not** safe to run more than once against the
+same Zalo accounts. Zalo permits a single active web listener per account —
+a second process would fight the first for the same session, and each would
+knock the other offline. Run exactly one.
+
+zca-js holds websocket state and buffers per session, so a leak ends in OOM
+and a supervisor restart, which restores every session and leaks again. Two
+things to configure outside the app:
+
+- Alert on `memory.heap_used_mb` from `GET /healthz`, which climbs before the
+  crash. Nothing inside a process can reliably report its own OOM.
+- Cap the restart rate in your supervisor (systemd `StartLimitBurst`,
+  Kubernetes `CrashLoopBackOff`, or an overmind wrapper). Without a cap, a
+  leaking sidecar restarts forever and looks healthy from the outside.
+
 ## Security notes
 
 - Session cookies and IMEI are encrypted at rest via Active Record Encryption.
 - The internal API between Rails and Node is token-authenticated and locked to localhost via route constraint.
-- Cookies are transferred plaintext over localhost HTTP (documented red team finding C3); production hardening should add mTLS.
-- SSRF-protected: proxies cannot point at loopback, RFC1918, link-local, CGNAT, or IPv6 ULA ranges unless `ZALO_PROXY_ALLOW_INTERNAL=true`.
+- Cookies are sealed with AES-256-GCM for the hop between Rails and the sidecar (`Zalo::TransportCipher` and its TypeScript mirror), under a key derived from `ZALO_SERVICE_INTERNAL_TOKEN`. This stops passive capture of loopback traffic; it is not mTLS, and anything able to read either process's environment holds the key.
+- Session ids are authorised against the owning account on every dashboard call. Unknown and foreign ids are rejected identically, so responses cannot be used to probe which ids exist.
+- Reconnecting an inbox with a different Zalo account is rejected rather than silently accepted.
+- SSRF-protected: proxy hosts are resolved and every resulting address is checked against `ssrf_filter`'s range lists (loopback, RFC1918, link-local including cloud metadata, CGNAT, multicast, IPv6 equivalents) unless `ZALO_PROXY_ALLOW_INTERNAL=true`. Checked at save time only — a host that later re-points at an internal address is not caught.
 - Pino log redaction strips cookies, IMEI, and internal tokens from Node logs.
 
 ## Compliance and legal

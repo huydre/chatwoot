@@ -72,20 +72,53 @@ export class SessionPersistenceClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  async listActive(): Promise<RailsSessionRow[]> {
+  /**
+   * Blocks until Rails answers its health check, or the deadline passes.
+   *
+   * Node and Rails start concurrently under the Procfile, and Rails may still
+   * be loading or migrating. Without this the boot-time restore ran against a
+   * Rails that was not up yet, exhausted its three retries in about a second,
+   * and reported "no sessions to restore" — leaving every session down until
+   * someone noticed (red team H2).
+   */
+  async waitUntilRailsReady(timeoutMs = 60_000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    let delay = 500;
+
+    while (Date.now() < deadline) {
+      try {
+        const res = await this.fetchImpl(`${this.baseUrl}/health`, {
+          method: 'GET',
+        });
+        if (res.ok) return true;
+        log.warn({ status: res.status }, 'rails health check not ok yet');
+      } catch (err) {
+        log.debug(
+          { reason: err instanceof Error ? err.message : String(err) },
+          'rails not reachable yet',
+        );
+      }
+      await sleep(delay);
+      delay = Math.min(delay * 2, 5_000);
+    }
+    return false;
+  }
+
+  /**
+   * Returns null when Rails could not be asked, as distinct from [] meaning
+   * Rails answered and has nothing to restore. Collapsing the two is what
+   * made a failed restore look like a successful empty one.
+   */
+  async listActive(): Promise<RailsSessionRow[] | null> {
     // No status query param — Rails falls back to the .active scope
     // which covers [pending, qr_ready, scanning, confirmed, ready].
     // Passing ?status=active would match zero rows because 'active' is
     // not a real ZaloSession status value.
     const res = await this.request('GET', '/internal/zalo_sessions');
-    if (!res) return [];
-    if (res.status === 404) {
-      log.warn('rails internal API returned 404 — continuing with empty session list');
-      return [];
-    }
+    if (!res) return null;
     if (!res.ok) {
       log.warn({ status: res.status }, 'listActive: non-ok response');
-      return [];
+      return null;
     }
     return (await res.json()) as RailsSessionRow[];
   }

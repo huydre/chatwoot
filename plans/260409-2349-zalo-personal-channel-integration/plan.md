@@ -1,6 +1,6 @@
 ---
 name: Zalo Personal Channel Integration
-status: planning
+status: implemented
 created: 2026-04-09
 owner: hnam
 blockedBy: []
@@ -32,7 +32,7 @@ Tích hợp **Zalo Personal** như 1 native channel trong Chatwoot (giống Tele
 │  ┌────────────────────────┐        ┌────────────────────────────────────┐ │
 │  │ Rails (Ruby)           │        │ zalo_service/ (Node.js)            │ │
 │  │                        │        │                                    │ │
-│  │ • Channel::Zalo        │◄──Redis pub/sub───┤ zca-js wrapper          │ │
+│  │ • Channel::Zalo        │◄──Redis stream────┤ zca-js wrapper          │ │
 │  │ • Zalo controllers     │                   │ Multi-session manager   │ │
 │  │ • Zalo services        │   HTTP (outbound) │ QR login service        │ │
 │  │ • Vue QR UI            ├──────────────────►│ Session heartbeat       │ │
@@ -48,8 +48,23 @@ Tích hợp **Zalo Personal** như 1 native channel trong Chatwoot (giống Tele
 **Key insight:** Rails cannot talk to Zalo directly (protocol needs Node). Thay vì chạy 2 service tách rời, embed Node service trong monorepo như 1 Procfile process — user vẫn chỉ chạy `overmind start`.
 
 **Communication pattern:**
-- **Node → Rails** (inbound): Redis pub/sub + Rails subscriber initializer → enqueue Sidekiq job
+- **Node → Rails** (inbound): Redis stream `zalo.events` + consumer group `chatwoot-rails` → enqueue Sidekiq job. Was pub/sub; changed for red team C1, since pub/sub fanned out to every pod and dropped events published while no subscriber was attached.
 - **Rails → Node** (outbound): HTTP POST internal `localhost:4567/send` (not exposed)
+
+## Status — 2026-08-03
+
+All phases are implemented and the branch is `feat/zalo-personal`. The phase
+table below was never updated as work landed, so treat its checkboxes as
+historical rather than current.
+
+Red team H1 was right about the estimate: the plan said 2-3 weeks against a
+scope that had already grown, and the review's 7-9 week figure was closer.
+All four CRITICAL findings and the HIGH findings are now resolved, declined
+with reasoning, or documented — see
+[the red team review](./reports/red-team-260410-0015-plan-review.md) for
+the current state of each. MEDIUM and LOW remain open.
+
+Not yet exercised: the QR login flow against a real Zalo account.
 
 ## Phase Overview
 

@@ -43,9 +43,24 @@ const RESTORE_CONCURRENCY = 5;
 export async function restoreSessionsFromRails(
   persistence: SessionPersistenceClient = new SessionPersistenceClient(),
 ): Promise<{ restored: number; failed: number }> {
+  if (!(await persistence.waitUntilRailsReady())) {
+    log.error(
+      'session-bootstrap: Rails did not become ready in time — no sessions restored. ' +
+        'Existing Zalo sessions stay offline until this process restarts.',
+    );
+    return { restored: 0, failed: 0 };
+  }
+
   log.info('session-bootstrap: fetching active sessions from Rails');
 
   const rows = await persistence.listActive();
+  if (rows === null) {
+    log.error(
+      'session-bootstrap: could not read the session list from Rails — no sessions restored. ' +
+        'This is a failure, not an empty list.',
+    );
+    return { restored: 0, failed: 0 };
+  }
   if (rows.length === 0) {
     log.info('session-bootstrap: no sessions to restore');
     return { restored: 0, failed: 0 };

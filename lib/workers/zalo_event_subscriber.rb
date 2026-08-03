@@ -95,13 +95,13 @@ module ZaloEventSubscriber
       when 'qr_code'
         # Cache QR so the Rails proxy endpoint can short-circuit the next
         # poll from the Vue frontend without hitting Node again.
-        Rails.cache.write(
-          "zalo:qr:#{event['session_id']}",
+        Redis::Alfred.setex(
+          format(Redis::RedisKeys::ZALO_QR_CODE, session_id: event['session_id']),
           event['qr_base64'],
-          expires_in: 120
+          2.minutes
         )
       when 'qr_expired'
-        Rails.cache.delete("zalo:qr:#{event['session_id']}")
+        Redis::Alfred.delete(format(Redis::RedisKeys::ZALO_QR_CODE, session_id: event['session_id']))
       when 'message_delivery_error'
         Zalo::DeliveryErrorJob.perform_later(event)
       when 'thread_list_item'
@@ -111,10 +111,10 @@ module ZaloEventSubscriber
           "[Zalo sync] session=#{event['session_id']} stage=#{event['stage']} " \
           "processed=#{event['processed']} total=#{event['total']}"
         )
-        Rails.cache.write(
-          "zalo:sync_progress:#{event['session_id']}",
-          event.slice('stage', 'processed', 'total', 'error_message'),
-          expires_in: 30.minutes
+        Redis::Alfred.setex(
+          format(Redis::RedisKeys::ZALO_SYNC_PROGRESS, session_id: event['session_id']),
+          event.slice('stage', 'processed', 'total', 'error_message').to_json,
+          30.minutes
         )
       else
         Rails.logger.warn "[ZaloSubscriber] unknown event type=#{event['type']}"

@@ -23,7 +23,22 @@ All four CRITICAL findings are now addressed on `feat/zalo-personal`:
 | C3 | Fixed | Cookies are sealed with AES-256-GCM (`Zalo::TransportCipher` / `transport-cipher.ts`) under a key derived from the shared service token. Verified byte-compatible in both directions and that a tampered tag is rejected. Not equivalent to mTLS: an attacker who can read either process's environment holds the key too. |
 | C4 | Verified | Every zca-js call typechecks against the library's own declarations with no `any` or `@ts-ignore` in the integration layer. Version pinned to the exact 2.1.2 that was resolved and tested — the previous `^2.0.0-beta.21` range had already floated a full minor ahead. |
 
-HIGH and below remain open. Note H10 turned out to matter more than logged: Chatwoot ships `null_store` in dev/test and leaves `cache_store` unconfigured in production, so `Rails.cache` is not a shared store. The C2 ownership binding uses `Redis::Alfred` for that reason; the pre-existing `zalo:qr:*` cache writes still assume otherwise and degrade to polling Node.
+### HIGH — 2026-08-03
+
+| # | Status | Resolution |
+|---|---|---|
+| H1 | Acknowledged | Estimate was for the pre-decision scope. Actual: ~4 months elapsed, and the phases did land. Timeline note added to plan.md; not a code finding. |
+| H2 | Fixed | The failure mode was fail-quiet, not the predicted infinite loop — retries were already bounded at 3, so an unready Rails returned `[]` and the sidecar logged "no sessions to restore" while every session stayed down. Boot now waits on Rails `/health` with a 60s deadline, and `listActive` returns `null` for "could not ask" versus `[]` for "nothing to restore". |
+| H3 | Already done | Classifier matches on message, code and name together, and defaults unknown to non-recoverable so retry loops bail. Verified. |
+| H4 | Already done | No per-tick `getUserInfo` call: probes fire only for sessions idle >10min, the interval is jittered, and the probe reads a local getter rather than calling Zalo. Verified. |
+| H5 | **Declined** | The proposed composite unique `(account_id, zalo_own_id)` would let two Chatwoot accounts link one Zalo account — but Zalo allows a single active listener per account, so the two sessions would knock each other offline continuously. The global unique index prevents that configuration; it now fails with a 409 instead of silently adopting the other account's channel. |
+| H6 | Partial | `/healthz` now reports `heap_used_mb`/`rss_mb` so the climb is visible before OOM. A process cannot rate-limit its own restarts, so that stays with the supervisor and is documented in docs/integrations/zalo-personal.md. |
+| H7 | Fixed | Reconnecting with a different Zalo account was silently accepted: the channel kept its old `zalo_own_id` while the live session belonged to someone else, routing that person's conversations into this inbox. Now rejected with `zalo_account_mismatch`. |
+| H8 | Fixed | The validator claimed to use `ssrf_filter` but was hand-rolled string prefixes — it missed `0.0.0.0` and the `169.254.169.254` metadata address, never resolved hostnames, and misread public names like `10.example.com`. Now resolves the host and checks every address against the gem's range lists. Save-time only; DNS rebinding remains open. |
+| H9 | **Obsolete** | The finding assumed pub/sub. With the C1 consumer group, running `zalo_listener` on every pod is the intended configuration. The real single-instance constraint is the Node sidecar, because Zalo allows one listener per account — documented. |
+| H10 | Fixed | Confirmed worse than logged: `Rails.cache` is `NullStore` in dev/test and unconfigured in production, so the QR, session-status and sync-progress handoffs between `zalo_listener` and web workers were writing to nowhere. All four keys moved to `Redis::Alfred` via `Redis::RedisKeys`. |
+
+MEDIUM and LOW remain open.
 
 ---
 

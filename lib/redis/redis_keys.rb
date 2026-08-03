@@ -104,4 +104,19 @@ module Redis::RedisKeys
 
   ## Account Email Rate Limiting
   ACCOUNT_OUTBOUND_EMAIL_COUNT_KEY = 'OUTBOUND_EMAIL_COUNT::%<account_id>d::%<date>s'.freeze
+
+  ## Zalo Personal channel
+  # Written by the zalo_listener process, read by web workers, so these must
+  # live in shared Redis rather than Rails.cache — Chatwoot ships null_store
+  # in dev/test and leaves cache_store unconfigured in production, which
+  # would strand every reader on a different process (red team H10).
+  # Which Chatwoot account owns an in-flight QR session, before the session
+  # exists in Postgres.
+  ZALO_SESSION_ACCOUNT = 'ZALO::SESSION_ACCOUNT::%<session_id>s'.freeze
+  # Latest QR image for a pending login, so polling need not hit Node.
+  ZALO_QR_CODE = 'ZALO::QR::%<session_id>s'.freeze
+  # Marks a session as logged in, so polling stops serving a stale QR.
+  ZALO_SESSION_STATUS = 'ZALO::SESSION_STATUS::%<session_id>s'.freeze
+  # Progress of a thread/history sync, as JSON.
+  ZALO_SYNC_PROGRESS = 'ZALO::SYNC_PROGRESS::%<session_id>s'.freeze
 end

@@ -58,8 +58,10 @@ class Api::V1::Accounts::Channels::ZaloController < Api::V1::Accounts::BaseContr
     channel = Channel::Zalo.find(params[:channel_id])
     authorize_channel!(channel)
     session = channel.zalo_session
-    cached = Rails.cache.read("zalo:sync_progress:#{session&.session_id}")
-    render json: cached || { stage: 'idle' }
+    return render json: { stage: 'idle' } if session.blank?
+
+    cached = Redis::Alfred.get(format(Redis::RedisKeys::ZALO_SYNC_PROGRESS, session_id: session.session_id))
+    render json: cached.present? ? JSON.parse(cached) : { stage: 'idle' }
   end
 
   private
