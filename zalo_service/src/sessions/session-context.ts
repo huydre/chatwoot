@@ -1,7 +1,16 @@
-// zca-js does not re-export its ApiHandle class as a type, so we treat the handle as
-// opaque. All interaction with the real ApiHandle goes through the listener + the
-// sendMessage call site in Phase 04.
-type ApiHandle = unknown;
+import type * as zcaJs from 'zca-js';
+
+// The handle is whatever loginQR resolves to, derived from zca-js's own
+// declarations. It has to come through a namespace import: zca-js's root
+// index.d.ts declares `export as namespace Zalo`, and that UMD namespace
+// shadows the re-exported `Zalo` class, so `import type { Zalo }` does not
+// resolve.
+//
+// This used to be `unknown`, and each call site then re-declared its own
+// structural interface with optional methods. That is precisely how an
+// upstream signature change slips past the compiler: the calls typecheck
+// against a hand-written shape that nothing keeps in step with the library.
+type ApiHandle = Awaited<ReturnType<InstanceType<typeof zcaJs.Zalo>['loginQR']>>;
 
 /**
  * Per-session state container.

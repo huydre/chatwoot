@@ -1,3 +1,5 @@
+import type { API } from 'zca-js';
+
 import { childLogger } from '../logger.js';
 import { publishEvent } from '../redis/event-publisher.js';
 import type { SessionContext } from '../sessions/session-context.js';
@@ -27,27 +29,16 @@ const log = childLogger({ component: 'zalo-sync-service' });
 
 const GROUP_HISTORY_COUNT = 50;
 const SLEEP_BETWEEN_CALLS_MS = 500;
+// Zalo rejects getGroupInfo outright once the id list gets long — an account
+// in 113 groups got "Tham số không hợp lệ" for the whole call, so every group
+// was lost rather than some. Zalo Web itself pages these, so we batch too.
+const GROUP_INFO_BATCH_SIZE = 50;
 
-interface ZcaApiForSync {
-  getAllFriends?: () => Promise<unknown[]>;
-  // getAllGroups returns { version, gridVerMap: { [id]: version } }
-  getAllGroups?: () => Promise<{ gridVerMap?: Record<string, string> } | unknown>;
-  // getGroupInfo accepts an array of ids and returns full metadata
-  getGroupInfo?: (ids: string[]) => Promise<{
-    gridInfoMap?: Record<string, Record<string, unknown>>;
-  } | unknown>;
-  // getGroupMembersInfo resolves member uids to { displayName, zaloName, avatar }
-  getGroupMembersInfo?: (ids: string[]) => Promise<{
-    profiles?: Record<
-      string,
-      { displayName?: string; zaloName?: string; avatar?: string }
-    >;
-  } | unknown>;
-  getGroupChatHistory?: (groupId: string, count?: number) => Promise<{
-    groupMsgs?: unknown[];
-    more?: number;
-  }>;
-}
+// Calls go through zca-js's own API type. This file used to declare a local
+// interface with every method optional, so the compiler checked the calls
+// against a hand-written shape instead of the library — exactly the blind
+// spot that hides an upstream signature change.
+type ZcaApiForSync = API;
 
 // In-memory sync job tracking. Keyed by session_id so we do not start
 // two syncs on the same session concurrently.
@@ -91,31 +82,47 @@ async function runSync(
   ctx: SessionContext,
   opts: { includeGroupHistory?: boolean },
 ): Promise<void> {
-  const api = ctx.api as unknown as ZcaApiForSync;
   const sessionId = ctx.sessionId;
+  // startSync checked this, but the session can drop between the check and
+  // this task actually running.
+  const api: ZcaApiForSync | null = ctx.api;
+  if (!api) {
+    log.warn({ session_id: sessionId }, 'sync: session lost its api handle before the run started');
+    return;
+  }
 
   try {
     // ---- Stage 1: thread list ---------------------------------------------
     updateStage(sessionId, 'threads');
 
     const friends = await safeCall('getAllFriends', () =>
-      api.getAllFriends?.() ?? Promise.resolve([]),
+      api.getAllFriends(),
     );
     const friendList = Array.isArray(friends) ? friends : [];
 
     // Two-step group fetch: getAllGroups gives us only {id: version}, then
     // getGroupInfo(ids) returns the actual metadata needed for display.
     const groupIdListRaw = await safeCall('getAllGroups', () =>
-      api.getAllGroups?.() ?? Promise.resolve({}),
+      api.getAllGroups(),
     );
     const groupIds = extractGroupIds(groupIdListRaw);
-    let groupList: Array<Record<string, unknown>> = [];
-    if (groupIds.length > 0 && api.getGroupInfo) {
-      const groupInfoRaw = await safeCall('getGroupInfo', () =>
-        api.getGroupInfo!(groupIds),
-      );
-      groupList = normalizeGroups(groupInfoRaw);
-    }
+    // Zalo rejects getGroupInfo with "Tham số không hợp lệ" for some accounts.
+    // The ids come straight from getAllGroups, so log enough to tell whether
+    // the shape changed or Zalo simply refuses these ids — without dumping
+    // the whole response, which names every group the account belongs to.
+    log.info(
+      {
+        session_id: sessionId,
+        raw_keys: groupIdListRaw && typeof groupIdListRaw === 'object'
+          ? Object.keys(groupIdListRaw as Record<string, unknown>)
+          : typeof groupIdListRaw,
+        group_id_count: groupIds.length,
+        first_id_len: groupIds[0]?.length,
+      },
+      'sync: getAllGroups shape',
+    );
+
+    const groupList = await fetchGroupInfoInBatches(api, groupIds);
 
     log.info(
       { session_id: sessionId, friends: friendList.length, groups: groupList.length },
@@ -156,7 +163,7 @@ async function runSync(
         const memberMap = await fetchMemberNameMap(api, group);
 
         try {
-          const history = await api.getGroupChatHistory?.(groupId, GROUP_HISTORY_COUNT);
+          const history = await api.getGroupChatHistory(groupId, GROUP_HISTORY_COUNT);
           const msgs = Array.isArray(history?.groupMsgs) ? history.groupMsgs : [];
           for (const msg of msgs) {
             await publishHistoricalMessage(sessionId, msg, memberMap);
@@ -226,6 +233,34 @@ async function safeCall<T>(label: string, fn: () => Promise<T>): Promise<T | nul
     );
     return null;
   }
+}
+
+/**
+ * Resolves group metadata in batches.
+ *
+ * One batch failing costs only that batch, so an account with a single
+ * problematic group still syncs the rest — the previous single call meant
+ * one bad id, or simply too many ids, lost every group.
+ */
+async function fetchGroupInfoInBatches(
+  api: ZcaApiForSync,
+  groupIds: string[],
+): Promise<Array<Record<string, unknown>>> {
+  const groups: Array<Record<string, unknown>> = [];
+
+  for (let i = 0; i < groupIds.length; i += GROUP_INFO_BATCH_SIZE) {
+    const batch = groupIds.slice(i, i + GROUP_INFO_BATCH_SIZE);
+    const raw = await safeCall(`getGroupInfo[${i}..${i + batch.length - 1}]`, () =>
+      api.getGroupInfo(batch),
+    );
+    groups.push(...normalizeGroups(raw));
+
+    if (i + GROUP_INFO_BATCH_SIZE < groupIds.length) {
+      await sleep(SLEEP_BETWEEN_CALLS_MS);
+    }
+  }
+
+  return groups;
 }
 
 /**

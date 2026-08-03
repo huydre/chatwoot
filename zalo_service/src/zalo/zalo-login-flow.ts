@@ -1,3 +1,5 @@
+import type { API } from 'zca-js';
+
 import { encryptForRails } from '../crypto/transport-cipher.js';
 import { childLogger } from '../logger.js';
 import { publishEvent } from '../redis/event-publisher.js';
@@ -34,15 +36,16 @@ import type { SessionPersistenceClient } from '../sessions/session-persistence-c
 
 const log = childLogger({ component: 'zalo-login-flow' });
 
-// Minimal shape of what we need from zca-js. Keeps the test fake small.
+// Minimal shape of what we need from zca-js, so the test fake stays small.
+// The *return* type is the library's real one: everything downstream calls
+// methods on it, and typing it as unknown is what let those calls drift.
+// A fake in a test can cast; production code must not.
 export interface ZaloLike {
   loginQR(
     options: { userAgent?: string; language?: string; qrPath?: string } | undefined,
     callback: (event: unknown) => void,
-  ): Promise<unknown>;
+  ): Promise<API>;
 }
-
-type ZaloApi = unknown;
 
 export interface ZaloFactory {
   create(): ZaloLike;
@@ -210,7 +213,7 @@ export async function startLoginFlow(
   }
 }
 
-function extractOwnId(api: ZaloApi): string {
+function extractOwnId(api: API): string {
   const candidate = api as unknown as {
     getOwnId?: () => string;
     ctx?: { uid?: string };

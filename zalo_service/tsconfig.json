@@ -15,7 +15,13 @@
     "sourceMap": true,
     "baseUrl": "src",
     "paths": {
-      "@/*": ["./*"]
+      "@/*": ["./*"],
+      // zca-js ships types, but its root index.d.ts re-exports with
+      // `export * from "./dist"` — extensionless, which NodeNext cannot
+      // resolve — and its exports map blocks the subpath, so the package
+      // reads as having no types at all. Pointing at the real declaration
+      // file restores them. Types only; runtime resolution is untouched.
+      "zca-js": ["../node_modules/zca-js/dist/index.d.ts"]
     },
     "noUnusedLocals": true,
     "noUnusedParameters": true,
