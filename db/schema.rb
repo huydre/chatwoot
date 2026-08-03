@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[7.1].define(version: 2026_04_09_091202) do
+ActiveRecord::Schema[7.1].define(version: 2026_04_10_000003) do
   # These extensions should be enabled to support this database
   enable_extension "pg_stat_statements"
   enable_extension "pg_trgm"
@@ -582,6 +582,19 @@ ActiveRecord::Schema[7.1].define(version: 2026_04_09_091202) do
     t.jsonb "message_templates", default: {}
     t.datetime "message_templates_last_updated", precision: nil
     t.index ["phone_number"], name: "index_channel_whatsapp_on_phone_number", unique: true
+  end
+
+  create_table "channel_zalo", force: :cascade do |t|
+    t.integer "account_id", null: false
+    t.string "zalo_own_id"
+    t.string "display_name"
+    t.string "phone_number", limit: 32
+    t.string "avatar_url"
+    t.integer "rate_limit_per_minute"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_channel_zalo_on_account_id"
+    t.index ["zalo_own_id"], name: "index_channel_zalo_on_zalo_own_id", unique: true, where: "(zalo_own_id IS NOT NULL)"
   end
 
   create_table "companies", force: :cascade do |t|
@@ -1288,9 +1301,47 @@ ActiveRecord::Schema[7.1].define(version: 2026_04_09_091202) do
     t.index ["inbox_id"], name: "index_working_hours_on_inbox_id"
   end
 
+  create_table "zalo_proxies", force: :cascade do |t|
+    t.integer "account_id", null: false
+    t.string "name", null: false
+    t.string "scheme", limit: 16, null: false
+    t.string "host", null: false
+    t.integer "port", null: false
+    t.string "username"
+    t.text "password"
+    t.string "status", default: "active", null: false
+    t.datetime "last_checked_at"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["account_id"], name: "index_zalo_proxies_on_account_id"
+    t.index ["status"], name: "index_zalo_proxies_on_status"
+  end
+
+  create_table "zalo_sessions", force: :cascade do |t|
+    t.bigint "channel_zalo_id", null: false
+    t.bigint "zalo_proxy_id"
+    t.string "session_id", null: false
+    t.text "cookies"
+    t.text "imei"
+    t.string "user_agent", limit: 512
+    t.string "status", default: "pending", null: false
+    t.datetime "last_connected_at"
+    t.datetime "last_seen_at"
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["channel_zalo_id"], name: "index_zalo_sessions_on_channel_zalo_id"
+    t.index ["session_id"], name: "index_zalo_sessions_on_session_id", unique: true
+    t.index ["status"], name: "index_zalo_sessions_on_status"
+    t.index ["zalo_proxy_id"], name: "index_zalo_sessions_on_zalo_proxy_id"
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "inboxes", "portals"
+  add_foreign_key "zalo_sessions", "channel_zalo", on_delete: :cascade
+  add_foreign_key "zalo_sessions", "zalo_proxies", on_delete: :nullify
   create_trigger("accounts_after_insert_row_tr", :generated => true, :compatibility => 1).
       on("accounts").
       after(:insert).
