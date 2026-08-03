@@ -24,7 +24,12 @@ sessionRouter.post('/:session_id/sync', async (req: Request, res: Response) => {
   }
 
   const includeGroupHistory = req.body?.include_group_history !== false;
-  const result = await startSync(ctx, { includeGroupHistory });
+  // History is the expensive half: two Zalo calls per group. An account in
+  // 113 groups is 226 calls in one burst, so callers can cap how many groups
+  // to walk and run it again later for the rest.
+  const rawLimit = Number(req.body?.group_limit);
+  const groupLimit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : undefined;
+  const result = await startSync(ctx, { includeGroupHistory, groupLimit });
 
   if (!result.started) {
     res.status(409).json({ error: result.reason ?? 'already_running' });

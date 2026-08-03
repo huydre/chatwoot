@@ -141,9 +141,37 @@ The existing conversation history is preserved — only the session cookies are 
 | Outbound send fails with `zalo_rate_limit_exceeded` | Too many messages in 60s | Adjust `ZALO_OUTBOUND_RATE_LIMIT_PER_MINUTE` or the channel override |
 | Outbound send fails with `zalo_circuit_open` | 3 failures in 60s tripped the breaker | Investigate root cause, wait 5min for auto-reset, or force with `Zalo::CircuitBreaker.record_success(session_id)` |
 
+## Message history
+
+**Old messages cannot be imported.** Only messages sent after the inbox is
+connected appear in Chatwoot. This is a limit of what Zalo exposes, not a
+missing feature here:
+
+- **1:1 history** — no such API. None of zca-js 2.1.2's 148 methods return it.
+- **Group history** — `getGroupChatHistory` exists, but Zalo answers 404 for
+  `/api/group/history`. Every other call on the same service host works,
+  including `getGroupInfo`, which reports `enableMsgHistory: 1` for the very
+  groups whose history 404s. Open upstream bug:
+  [zca-js#367](https://github.com/RFS-ADRENO/zca-js/issues/367).
+
+The sync still attempts group history when asked, so it will start working
+the day upstream is fixed, and it now logs `group history unavailable for
+every group` instead of finishing quietly with nothing imported.
+
+`POST .../channels/zalo/:channel_id/sync` accepts:
+
+| field | meaning |
+|---|---|
+| `include_group_history` | default `true`; set `false` to sync contacts only |
+| `group_limit` | cap how many groups the history stage walks |
+
+`group_limit` matters because history costs two Zalo calls per group — an
+account in 113 groups is 226 calls in one burst. Contact/group metadata sync
+is unaffected and works fully.
+
 ## Known limitations (v1)
 
-- **Not scalable across multiple Rails pods.** The Redis subscriber is single-process; deploying 2+ Rails replicas will duplicate inbound jobs. A post-v1 upgrade to Redis Streams + consumer groups is needed for HA (red team finding C1).
+- **Old messages are not imported.** See the section above.
 - **Personal account only.** No support for Zalo OA (Official Account).
 - **Not E2E tested against a live Zalo account in CI.** Requires manual QR scan.
 - **Group chat supported but with reduced feature set** — member list polish deferred.

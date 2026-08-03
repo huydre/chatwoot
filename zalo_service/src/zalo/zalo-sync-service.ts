@@ -7,14 +7,23 @@ import type { SessionContext } from '../sessions/session-context.js';
 /**
  * Historical sync for a Zalo session.
  *
- * zca-js limitations (verified against upstream src/apis):
- *   - Group chat history IS available via api.getGroupChatHistory
- *   - 1:1 chat history is NOT — Zalo Web simply does not expose it
+ * What history is actually reachable (checked against zca-js 2.1.2, which is
+ * the latest release):
+ *   - 1:1 history: not exposed. None of the 148 API methods return it.
+ *   - Group history: api.getGroupChatHistory exists but Zalo answers 404 for
+ *     `/api/group/history`, while every other call on the same service host
+ *     works — including getGroupInfo, which reports enableMsgHistory: 1 for
+ *     the very groups whose history 404s. Upstream bug, still open:
+ *     https://github.com/RFS-ADRENO/zca-js/issues/367
+ *
+ * So stage 2 below currently imports nothing. It is left wired up because the
+ * call site is correct and will start working the day upstream is fixed, and
+ * because it now reports the failure rather than quietly finishing.
  *
  * Strategy:
  *   1. Fetch all friends and all groups via metadata APIs
  *   2. Publish one `thread_list_item` event per friend/group so Rails
- *      can create placeholder Contact + Conversation rows
+ *      can create the Contact
  *   3. For each group, pull recent messages via getGroupChatHistory and
  *      republish them as regular `message` events with `historical: true`
  *   4. Rails IncomingMessageService already dedupes by source_id so
@@ -56,7 +65,7 @@ function sleep(ms: number): Promise<void> {
 
 export async function startSync(
   ctx: SessionContext,
-  opts: { includeGroupHistory?: boolean } = {},
+  opts: { includeGroupHistory?: boolean; groupLimit?: number } = {},
 ): Promise<{ started: boolean; reason?: string }> {
   if (activeJobs.has(ctx.sessionId)) {
     return { started: false, reason: 'already_running' };
@@ -80,7 +89,7 @@ export async function startSync(
 
 async function runSync(
   ctx: SessionContext,
-  opts: { includeGroupHistory?: boolean },
+  opts: { includeGroupHistory?: boolean; groupLimit?: number },
 ): Promise<void> {
   const sessionId = ctx.sessionId;
   // startSync checked this, but the session can drop between the check and
@@ -153,8 +162,23 @@ async function runSync(
     if (opts.includeGroupHistory && groupList.length > 0) {
       updateStage(sessionId, 'group_history');
       let historyProcessed = 0;
+      let historyFailed = 0;
+      let lastHistoryError: string | undefined;
+      let importedMessages = 0;
 
-      for (const group of groupList) {
+      // Two Zalo calls per group, so an unbounded run on a large account is a
+      // long burst of traffic. Callers can cap it and come back for the rest.
+      const historyGroups = opts.groupLimit
+        ? groupList.slice(0, opts.groupLimit)
+        : groupList;
+      if (historyGroups.length < groupList.length) {
+        log.info(
+          { session_id: sessionId, syncing: historyGroups.length, total: groupList.length },
+          'sync: group history capped by group_limit',
+        );
+      }
+
+      for (const group of historyGroups) {
         const groupId = extractGroupId(group);
         if (!groupId) continue;
 
@@ -168,18 +192,17 @@ async function runSync(
           for (const msg of msgs) {
             await publishHistoricalMessage(sessionId, msg, memberMap);
           }
+          importedMessages += msgs.length;
           historyProcessed += 1;
           log.debug(
             { session_id: sessionId, group_id: groupId, messages: msgs.length },
             'sync: group history fetched',
           );
         } catch (err) {
+          historyFailed += 1;
+          lastHistoryError = err instanceof Error ? err.message : String(err);
           log.warn(
-            {
-              session_id: sessionId,
-              group_id: groupId,
-              err: err instanceof Error ? err.message : String(err),
-            },
+            { session_id: sessionId, group_id: groupId, err: lastHistoryError },
             'sync: group history fetch failed',
           );
         }
@@ -187,13 +210,36 @@ async function runSync(
         await sleep(SLEEP_BETWEEN_CALLS_MS);
       }
 
+      // Every group failing is the known upstream 404, not bad luck. Say so
+      // instead of reporting a clean run that imported nothing.
+      const allFailed = historyFailed > 0 && historyProcessed === 0;
+      if (allFailed) {
+        log.error(
+          { session_id: sessionId, groups: historyFailed, err: lastHistoryError },
+          'sync: group history unavailable for every group — see zca-js issue 367',
+        );
+      }
+
       void publishEvent({
         type: 'sync_progress',
         session_id: sessionId,
         stage: 'group_history',
         processed: historyProcessed,
-        total: groupList.length,
+        total: historyGroups.length,
+        ...(allFailed
+          ? { error_message: `group history unavailable (${lastHistoryError})` }
+          : {}),
       });
+
+      log.info(
+        {
+          session_id: sessionId,
+          groups_ok: historyProcessed,
+          groups_failed: historyFailed,
+          messages_imported: importedMessages,
+        },
+        'sync: group history finished',
+      );
     }
 
     // ---- Done -------------------------------------------------------------

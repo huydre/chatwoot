@@ -46,8 +46,10 @@ class Zalo::NodeApiClient
     delete("/session/#{session_id}")
   end
 
-  def start_sync(session_id, include_group_history: true)
-    post("/session/#{session_id}/sync", include_group_history: include_group_history)
+  def start_sync(session_id, include_group_history: true, group_limit: nil)
+    body = { include_group_history: include_group_history }
+    body[:group_limit] = group_limit if group_limit.present?
+    post("/session/#{session_id}/sync", body)
   end
 
   def sync_status(session_id)
