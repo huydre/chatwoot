@@ -39,6 +39,7 @@ module Zalo::ParamHelpers
   def zalo_content
     raw = payload.dig('data', 'content')
     return raw if raw.is_a?(String)
+    return '[sticker]' if sticker?
     # Multi-media or structured content arrives as a hash — fall back to a
     # placeholder so the UI still renders something.
     return raw['title'] if raw.is_a?(Hash) && raw['title'].present?
@@ -46,14 +47,26 @@ module Zalo::ParamHelpers
     '[attachment]'
   end
 
+  def sticker?
+    payload.dig('data', 'msgType') == 'chat.sticker'
+  end
+
   def zalo_timestamp
     ts = payload.dig('data', 'ts') || payload['ts']
     ts ? Time.zone.at(ts.to_i / 1000) : Time.current
   end
 
+  # A sticker carries no URL at all — its content is just
+  # {id, catId, type} — so the image has to be addressed by id. This public
+  # endpoint renders any sticker id as a single 240x240 PNG, including the
+  # animated ones (type 3), which keeps them displayable as a plain image
+  # attachment rather than needing a frame-by-frame player.
+  STICKER_IMAGE_URL = 'https://zalo-api.zadn.vn/api/emoticon/sprite?eid=%s'.freeze
+
   def zalo_attachments
     raw = payload.dig('data', 'content')
     return [] unless raw.is_a?(Hash)
+    return [{ 'url' => format(STICKER_IMAGE_URL, raw['id']), 'type' => :image }] if sticker? && raw['id'].present?
 
     # zca-js wraps media in the content hash with keys like href, thumb,
     # photoUrl, ... We extract the primary URL and let the Rails downloader
