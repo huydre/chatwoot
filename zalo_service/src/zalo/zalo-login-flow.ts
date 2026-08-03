@@ -1,3 +1,4 @@
+import { encryptForRails } from '../crypto/transport-cipher.js';
 import { childLogger } from '../logger.js';
 import { publishEvent } from '../redis/event-publisher.js';
 import type { SessionContext } from '../sessions/session-context.js';
@@ -53,7 +54,9 @@ export interface LoginFlowDeps {
 }
 
 export interface StartLoginOptions {
-  accountId?: number;
+  // Required: the session Rails persists is scoped to this account, and
+  // without it the internal API used to fall back to Account.first (C2).
+  accountId: number;
   existingChannelId?: number;
   userAgent?: string;
   language?: string;
@@ -173,7 +176,7 @@ export async function startLoginFlow(
       session_id: ctx.sessionId,
       own_id: ownId,
       display_name: ctx.displayName ?? undefined,
-      cookies: JSON.stringify(captured.cookie),
+      cookies_encrypted: encryptForRails(JSON.stringify(captured.cookie)),
       imei: captured.imei,
       user_agent: captured.userAgent,
       account_id: opts.accountId,

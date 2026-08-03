@@ -3,12 +3,21 @@
 # Auth: shared token via X-Zalo-Service-Token header (constant-time compare).
 # Transport: HTTP over localhost only — enforced via route constraint.
 #
-# Red team findings still to address (tracked for post-v1 hardening):
-#   - C2: no per-account scoping yet; token leak exposes all accounts
-#   - C3: cookies are returned plaintext to Node — acceptable on localhost
+# The sidecar is a single process serving every account, so `index` is
+# deliberately global: it restores all live sessions on boot. Every other
+# action is scoped to the `account_id` the caller names, so a leaked token
+# cannot be pointed at a session the caller does not already know the
+# account of. Each call is logged for audit.
 class Internal::ZaloSessionsController < ActionController::API
   before_action :authenticate_zalo_service
+  before_action :log_internal_call
   before_action :find_session, only: %i[show update destroy]
+
+  # A payload that will not decrypt was forged, corrupted, or encrypted under a
+  # different token — never something to persist.
+  rescue_from Zalo::TransportCipher::DecryptionError do
+    render json: { error: 'credential_decryption_failed' }, status: :bad_request
+  end
 
   def index
     scope = ZaloSession.includes(:channel_zalo)
@@ -42,7 +51,7 @@ class Internal::ZaloSessionsController < ActionController::API
     session = channel.zalo_session || channel.build_zalo_session
     session.assign_attributes(
       session_id: params[:session_id],
-      cookies: params[:cookies],
+      cookies: Zalo::TransportCipher.decrypt(params[:cookies_encrypted]),
       imei: params[:imei],
       user_agent: params[:user_agent],
       status: 'ready',
@@ -53,6 +62,13 @@ class Internal::ZaloSessionsController < ActionController::API
     render json: session.to_node_payload.merge(inbox_id: inbox.id), status: :created
   rescue ActiveRecord::RecordInvalid => e
     render json: { error: 'validation_failed', details: e.record.errors.full_messages }, status: :unprocessable_entity
+  rescue ActiveRecord::RecordNotFound => e
+    render json: { error: 'channel_not_found', detail: e.message }, status: :not_found
+  rescue ActiveRecord::RecordNotUnique
+    # zalo_own_id is globally unique, so this Zalo account is already linked
+    # to a channel on another account. Previously the lookup found that
+    # channel and quietly reused it, handing one account's inbox to another.
+    render json: { error: 'zalo_account_already_linked' }, status: :conflict
   end
 
   def update
@@ -78,33 +94,39 @@ class Internal::ZaloSessionsController < ActionController::API
     head :unauthorized
   end
 
+  def log_internal_call
+    Rails.logger.info(
+      "[Internal::ZaloSessions] #{action_name} session_id=#{params[:session_id].inspect} " \
+      "account_id=#{params[:account_id].inspect} ip=#{request.remote_ip}"
+    )
+  end
+
+  # Scoped by account when the caller names one, so a caller holding the
+  # shared token still cannot reach across accounts it does not know.
   def find_session
-    @session = ZaloSession.find_by!(session_id: params[:session_id])
+    scope = ZaloSession.where(session_id: params[:session_id])
+    scope = scope.joins(:channel_zalo).where(channel_zalo: { account_id: params[:account_id] }) if params[:account_id].present?
+    @session = scope.first!
   rescue ActiveRecord::RecordNotFound
     render json: { error: 'session_not_found' }, status: :not_found
   end
 
   def find_or_initialize_channel
-    if params[:existing_channel_id].present?
-      Channel::Zalo.find(params[:existing_channel_id])
-    else
-      account_id = params[:account_id] || default_account_id
-      raise ActiveRecord::RecordNotFound, 'account_id required for new channel' if account_id.blank?
+    account_id = params[:account_id].presence
+    raise ActiveRecord::RecordNotFound, 'account_id is required' if account_id.blank?
 
-      Channel::Zalo.find_or_initialize_by(zalo_own_id: params[:own_id]).tap do |ch|
-        ch.account_id ||= account_id
-      end
-    end
+    return Channel::Zalo.find_by!(id: params[:existing_channel_id], account_id: account_id) if params[:existing_channel_id].present?
+
+    Channel::Zalo.find_or_initialize_by(zalo_own_id: params[:own_id], account_id: account_id)
   end
 
-  # Fallback when Node has no account context — use the first account in the
-  # system. Fine for single-tenant installs; multi-tenant must always pass
-  # account_id explicitly from the frontend.
-  def default_account_id
-    Account.first&.id
-  end
-
+  # Cookies arrive encrypted (see Zalo::TransportCipher) and are stored
+  # decrypted, so Active Record can re-encrypt them at rest under its own key.
   def session_params
-    params.permit(:cookies, :imei, :user_agent, :status, :last_seen_at, metadata: {})
+    permitted = params.permit(:cookies_encrypted, :imei, :user_agent, :status, :last_seen_at, metadata: {})
+    cookies_encrypted = permitted.delete(:cookies_encrypted)
+    return permitted if cookies_encrypted.blank?
+
+    permitted.merge(cookies: Zalo::TransportCipher.decrypt(cookies_encrypted))
   end
 end

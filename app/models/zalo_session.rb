@@ -56,10 +56,8 @@ class ZaloSession < ApplicationRecord
       channel_zalo_id: channel_zalo_id,
       account_id: channel_zalo&.account_id,
       zalo_own_id: channel_zalo&.zalo_own_id,
-      # Returning plaintext cookies to the Node sidecar over localhost HTTP.
-      # Known red-team finding C3 — acceptable risk for v1, revisit with mTLS
-      # in production hardening phase.
-      cookies: cookies,
+      # Encrypted for the hop to the sidecar — see Zalo::TransportCipher.
+      cookies_encrypted: Zalo::TransportCipher.encrypt(cookies),
       imei: imei,
       user_agent: user_agent,
       proxy_url: zalo_proxy&.connection_url,

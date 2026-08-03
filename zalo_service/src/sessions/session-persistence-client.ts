@@ -27,7 +27,8 @@ export interface RailsSessionRow {
   channel_zalo_id: number;
   account_id: number;
   zalo_own_id: string | null;
-  cookies: string; // serialized JSON, plaintext across localhost transport
+  // Serialized JSON, AES-256-GCM sealed for the hop. Use decryptFromRails().
+  cookies_encrypted: string;
   imei: string;
   user_agent: string;
   proxy_url: string | null;
@@ -40,17 +41,17 @@ export interface CreateSessionPayload {
   session_id: string;
   own_id: string;
   display_name?: string;
-  cookies: string;
+  cookies_encrypted: string;
   imei: string;
   user_agent: string;
-  account_id?: number;
+  account_id: number;
   existing_channel_id?: number;
 }
 
 export interface PatchSessionPayload {
   status?: string;
   last_seen_at?: string;
-  cookies?: string;
+  cookies_encrypted?: string;
 }
 
 async function sleep(ms: number): Promise<void> {

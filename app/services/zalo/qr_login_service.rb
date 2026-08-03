@@ -2,6 +2,17 @@
 # The UI never talks to Node directly — it always goes through Rails so we
 # can attach account context + authorization + Rails-side caching.
 class Zalo::QrLoginService
+  # A QR session only reaches the database once Node finishes the login, so
+  # ownership is recorded at `start` and falls back to the row afterwards.
+  # Long enough to outlive the QR flow, short enough that a stale binding
+  # cannot outlive the session it names.
+  #
+  # Stored in Redis rather than Rails.cache deliberately: Chatwoot ships
+  # null_store in dev/test and leaves cache_store unconfigured in production,
+  # so a cache miss is the norm, not the exception — and a miss here would
+  # deny a legitimate login rather than merely cost a lookup.
+  SESSION_ACCOUNT_TTL = 1.hour
+
   def initialize(account:, existing_channel_id: nil)
     @account = account
     @existing_channel_id = existing_channel_id
@@ -18,10 +29,11 @@ class Zalo::QrLoginService
     response = node_client.start_login(payload)
     raise 'Zalo service unavailable' unless response.success?
 
-    response.parsed_response
+    response.parsed_response.tap { |result| bind_session_to_account(result['session_id']) }
   end
 
   def status(session_id)
+    authorize_session!(session_id)
     cached = Rails.cache.read("zalo:qr:#{session_id}")
     cached_status = Rails.cache.read("zalo:session_status:#{session_id}")
 
@@ -34,17 +46,43 @@ class Zalo::QrLoginService
   end
 
   def relogin(channel)
-    node_client.start_login(
+    result = node_client.start_login(
       account_id: @account.id,
       existing_channel_id: channel.id
     ).parsed_response
+    bind_session_to_account(result['session_id'])
+    result
   end
 
   def delete_session(session_id)
+    authorize_session!(session_id)
     node_client.delete_session(session_id)
   end
 
   private
+
+  def bind_session_to_account(session_id)
+    return if session_id.blank?
+
+    Redis::Alfred.setex(session_account_key(session_id), @account.id, SESSION_ACCOUNT_TTL)
+  end
+
+  # Denies unknown and foreign sessions identically so the response cannot be
+  # used to probe which session ids exist on other accounts.
+  def authorize_session!(session_id)
+    return if owner_account_id(session_id) == @account.id
+
+    raise Pundit::NotAuthorizedError, 'Session does not belong to current account'
+  end
+
+  def owner_account_id(session_id)
+    persisted = ZaloSession.joins(:channel_zalo).where(session_id: session_id).pick('channel_zalo.account_id')
+    persisted || Redis::Alfred.get(session_account_key(session_id))&.to_i
+  end
+
+  def session_account_key(session_id)
+    "zalo:session_account:#{session_id}"
+  end
 
   def node_client
     @node_client ||= Zalo::NodeApiClient.new

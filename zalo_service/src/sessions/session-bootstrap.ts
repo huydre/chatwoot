@@ -1,3 +1,4 @@
+import { decryptFromRails } from '../crypto/transport-cipher.js';
 import { childLogger } from '../logger.js';
 import { publishEvent } from '../redis/event-publisher.js';
 import { reloginWithCredentials } from '../zalo/zalo-client-factory.js';
@@ -80,7 +81,7 @@ async function restoreSingle(
   log.debug({ session_id: sessionId }, 'restoring session');
 
   try {
-    const cookies = JSON.parse(row.cookies) as unknown;
+    const cookies = JSON.parse(decryptFromRails(row.cookies_encrypted)) as unknown;
     const api = await reloginWithCredentials({
       cookie: cookies,
       imei: row.imei,

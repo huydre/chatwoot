@@ -12,6 +12,7 @@ const REDACT_PATHS = [
   // Cookies and session secrets anywhere in the log object
   '*.cookie',
   '*.cookies',
+  '*.cookies_encrypted',
   '*.imei',
   '*.accessToken',
   '*.access_token',
@@ -22,6 +23,7 @@ const REDACT_PATHS = [
   'req.headers.cookie',
   // Body fields for session persistence endpoints
   'req.body.cookies',
+  'req.body.cookies_encrypted',
   'req.body.imei',
   'req.body.user_agent',
   // QR base64 is too large to log even though not sensitive

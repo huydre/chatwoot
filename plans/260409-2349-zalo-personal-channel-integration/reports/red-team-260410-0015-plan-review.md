@@ -12,6 +12,21 @@ Plan is **thoughtful but optimistic**. Major structural issues: **HA is an after
 
 ---
 
+## Status update — 2026-08-03
+
+All four CRITICAL findings are now addressed on `feat/zalo-personal`:
+
+| # | Status | Resolution |
+|---|---|---|
+| C1 | Fixed | Pub/sub replaced with a Redis stream + consumer group (`zalo.events`, group `chatwoot-rails`). Verified: two consumers split 4 events 4/0 with no duplication, and a dead consumer's unacked entries are reclaimed via `XAUTOCLAIM`. This also fixes event loss across listener restarts, which pub/sub had even single-pod. |
+| C2 | Fixed | Dashboard `status`/`delete_session` were reachable cross-account by any logged-in user — now every session id is authorised against its owning account, with unknown and foreign ids denied identically. Internal API drops the `Account.first` fallback, scopes `existing_channel_id` by account, and logs every call. A second account reusing a Zalo id now gets 409 instead of silently adopting the first account's channel. |
+| C3 | Fixed | Cookies are sealed with AES-256-GCM (`Zalo::TransportCipher` / `transport-cipher.ts`) under a key derived from the shared service token. Verified byte-compatible in both directions and that a tampered tag is rejected. Not equivalent to mTLS: an attacker who can read either process's environment holds the key too. |
+| C4 | Verified | Every zca-js call typechecks against the library's own declarations with no `any` or `@ts-ignore` in the integration layer. Version pinned to the exact 2.1.2 that was resolved and tested — the previous `^2.0.0-beta.21` range had already floated a full minor ahead. |
+
+HIGH and below remain open. Note H10 turned out to matter more than logged: Chatwoot ships `null_store` in dev/test and leaves `cache_store` unconfigured in production, so `Rails.cache` is not a shared store. The C2 ownership binding uses `Redis::Alfred` for that reason; the pre-existing `zalo:qr:*` cache writes still assume otherwise and degrade to polling Node.
+
+---
+
 ## CRITICAL (blocks start)
 
 ### C1. Multi-Rails-pod deployment breaks entire inbound flow

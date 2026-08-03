@@ -23,7 +23,7 @@ const log = childLogger({ component: 'login-routes' });
 export const loginRouter = Router();
 
 const startLoginSchema = z.object({
-  account_id: z.number().int().positive().optional(),
+  account_id: z.number().int().positive(),
   existing_channel_id: z.number().int().positive().optional(),
   user_agent: z.string().optional(),
   language: z.string().optional(),

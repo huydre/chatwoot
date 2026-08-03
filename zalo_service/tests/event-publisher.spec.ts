@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-const publishSpy = vi.fn(async () => 1);
+const xaddSpy = vi.fn(async () => '1700000000000-0');
 
 vi.mock('../src/redis/redis-client.js', () => ({
   getPublisherClient: () => ({
-    publish: publishSpy,
+    xadd: xaddSpy,
   }),
   getCommandClient: () => ({ ping: async () => 'PONG' }),
   closeRedisClients: async () => {},
@@ -17,7 +17,7 @@ describe('event publisher', () => {
     process.env.LOG_LEVEL = 'fatal';
   });
 
-  it('publishes a valid session_ready event', async () => {
+  it('appends a valid session_ready event to the stream', async () => {
     const { publishEvent } = await import('../src/redis/event-publisher.js');
     await publishEvent({
       type: 'session_ready',
@@ -26,17 +26,21 @@ describe('event publisher', () => {
       display_name: 'Test User',
     });
 
-    expect(publishSpy).toHaveBeenCalled();
-    const lastCall = publishSpy.mock.calls[publishSpy.mock.calls.length - 1];
-    expect(lastCall[0]).toBe('zalo.events');
-    const payload = JSON.parse(lastCall[1] as string);
+    expect(xaddSpy).toHaveBeenCalled();
+    const args = xaddSpy.mock.calls[xaddSpy.mock.calls.length - 1] as unknown[];
+    // xadd(stream, 'MAXLEN', '~', maxlen, '*', 'payload', json)
+    expect(args[0]).toBe('zalo.events');
+    expect(args[1]).toBe('MAXLEN');
+    expect(args[4]).toBe('*');
+    expect(args[5]).toBe('payload');
+    const payload = JSON.parse(args[6] as string);
     expect(payload.type).toBe('session_ready');
     expect(payload.own_id).toBe('user_abc');
     expect(payload.timestamp).toBeDefined();
   });
 
   it('drops invalid events without publishing', async () => {
-    publishSpy.mockClear();
+    xaddSpy.mockClear();
     const { publishEvent } = await import('../src/redis/event-publisher.js');
     await publishEvent({
       // @ts-expect-error testing invalid shape
@@ -44,11 +48,11 @@ describe('event publisher', () => {
       session_id: 'not-a-uuid',
       own_id: 'user_abc',
     });
-    expect(publishSpy).not.toHaveBeenCalled();
+    expect(xaddSpy).not.toHaveBeenCalled();
   });
 
   it('does not crash when Redis publish throws', async () => {
-    publishSpy.mockImplementationOnce(async () => {
+    xaddSpy.mockImplementationOnce(async () => {
       throw new Error('redis down');
     });
     const { publishEvent } = await import('../src/redis/event-publisher.js');
