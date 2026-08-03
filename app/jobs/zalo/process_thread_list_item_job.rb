@@ -34,6 +34,8 @@ class Zalo::ProcessThreadListItemJob < ApplicationJob
       contact_attributes: contact_attributes(event)
     ).perform
 
+    refresh_placeholder_name(contact_inbox.contact, event)
+
     # Save avatar URL on the Contact so the Chatwoot sidebar renders
     # the group/contact picture sourced from Zalo. We set it directly
     # via avatar_url (Chatwoot fetches it async via AvatarFromUrlJob).
@@ -41,6 +43,26 @@ class Zalo::ProcessThreadListItemJob < ApplicationJob
   end
 
   private
+
+  # A group's real name only ever arrives on this sync — the message events
+  # Zalo pushes carry no group name, so IncomingMessageService has to fall
+  # back to "Zalo Group 156646". When a message from a group lands before the
+  # first sync, that generated name is what the contact keeps: the builder
+  # above finds the existing contact and leaves its name alone.
+  #
+  # So replace it here, but only when it is still one of those generated
+  # names. Anything else is either the real name already or something an
+  # agent typed, and neither should be overwritten.
+  PLACEHOLDER_NAME = /\AZalo (Group|User) \d+\z/
+
+  def refresh_placeholder_name(contact, event)
+    real_name = event['display_name'].to_s.strip
+    return if real_name.blank? || real_name.match?(PLACEHOLDER_NAME)
+    return if contact.name.present? && !contact.name.match?(PLACEHOLDER_NAME)
+    return if contact.name == real_name
+
+    contact.update!(name: real_name)
+  end
 
   def backfill_avatar(contact, avatar_url)
     return if avatar_url.blank?

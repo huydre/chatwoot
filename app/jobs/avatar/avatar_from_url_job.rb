@@ -10,6 +10,12 @@ class Avatar::AvatarFromUrlJob < ApplicationJob
   queue_as :purgable
 
   ALLOWED_CONTENT_TYPES = Avatarable::ALLOWED_AVATAR_CONTENT_TYPES
+  # Some CDNs label JPEGs with the non-standard image/jpg — Zalo's avatar hosts
+  # do it for every image, which rejected every avatar the Zalo channel synced.
+  # Accepted on fetch, then stored under the canonical type so the attachment
+  # validation and everything downstream still only ever sees image/jpeg.
+  CONTENT_TYPE_ALIASES = { 'image/jpg' => 'image/jpeg' }.freeze
+  FETCHABLE_CONTENT_TYPES = (ALLOWED_CONTENT_TYPES + CONTENT_TYPE_ALIASES.keys).freeze
   MAX_DOWNLOAD_SIZE = 15.megabytes
   RATE_LIMIT_WINDOW = 1.minute
 
@@ -38,7 +44,7 @@ class Avatar::AvatarFromUrlJob < ApplicationJob
       avatar_url,
       max_bytes: MAX_DOWNLOAD_SIZE,
       allowed_content_type_prefixes: [],
-      allowed_content_types: ALLOWED_CONTENT_TYPES
+      allowed_content_types: FETCHABLE_CONTENT_TYPES
     ) do |avatar_file|
       attach_avatar(avatarable, avatar_file)
     end
@@ -50,7 +56,7 @@ class Avatar::AvatarFromUrlJob < ApplicationJob
     avatarable.avatar.attach(
       io: avatar_file.tempfile,
       filename: avatar_file.original_filename,
-      content_type: avatar_file.content_type
+      content_type: CONTENT_TYPE_ALIASES.fetch(avatar_file.content_type, avatar_file.content_type)
     )
   end
 
