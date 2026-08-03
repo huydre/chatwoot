@@ -42,28 +42,45 @@ class Zalo::IncomingMessageService
   end
 
   def set_contact
-    # For group messages, the "contact" is the group itself (keyed by
-    # threadId) so every member's message lands in the same Chatwoot
-    # conversation. For 1:1 messages, keep the sender (uidFrom) as the
-    # contact key.
-    source_id = group_message? ? zalo_thread_id.to_s : zalo_from_id.to_s
-    display_name = group_message? ? "Zalo Group #{zalo_thread_id.to_s.last(6)}" : zalo_from_name
-
+    # A Chatwoot conversation maps to a Zalo thread, so the contact is keyed by
+    # threadId: the group for group chats, the other party for 1:1.
+    #
+    # This used to key 1:1 on the sender (uidFrom), which only coincides with
+    # the thread on messages the account *receives*. For a message the account
+    # sends from the Zalo app, uidFrom is the account itself — so every such
+    # message opened a conversation with the operator's own name on it instead
+    # of landing in the recipient's thread.
     contact_inbox = ::ContactInboxWithContactBuilder.new(
-      source_id: source_id,
+      source_id: zalo_thread_id.to_s,
       inbox: inbox,
       contact_attributes: {
-        name: display_name,
+        name: contact_display_name,
         additional_attributes: {
           social_zalo_thread_id: zalo_thread_id,
           social_zalo_thread_type: zalo_thread_type,
-          social_zalo_user_id: group_message? ? nil : zalo_from_id,
-          social_zalo_user_name: group_message? ? nil : zalo_from_name
+          social_zalo_user_id: group_message? ? nil : zalo_thread_id,
+          social_zalo_user_name: peer_name
         }.compact
       }
     ).perform
     @contact_inbox = contact_inbox
     @contact = contact_inbox.contact
+  end
+
+  # dName names the *sender*, so it only describes the peer on an inbound 1:1
+  # message. Groups and self messages fall back to a placeholder that
+  # Zalo::ProcessThreadListItemJob overwrites once the thread list resolves the
+  # real title.
+  def contact_display_name
+    return "Zalo Group #{zalo_thread_id.to_s.last(6)}" if group_message?
+
+    peer_name || "Zalo User #{zalo_thread_id.to_s.last(6)}"
+  end
+
+  def peer_name
+    return nil if group_message? || self_message?
+
+    zalo_from_name
   end
 
   def set_conversation
@@ -87,28 +104,33 @@ class Zalo::IncomingMessageService
     )
   end
 
-  def build_message
-    # For group messages, store the sender name/id in content_attributes
-    # since the conversation "contact" is the group, not the sender.
-    extra_attrs = { zalo_thread_type: zalo_thread_type }
-    if group_message?
-      extra_attrs[:zalo_sender_id] = zalo_from_id
-      extra_attrs[:zalo_sender_name] = zalo_from_name
-    end
+  # For group messages, store the sender name/id here since the conversation
+  # "contact" is the group, not the sender.
+  def message_content_attributes
+    attrs = { zalo_thread_type: zalo_thread_type }
+    return attrs unless group_message?
 
+    attrs.merge(zalo_sender_id: zalo_from_id, zalo_sender_name: zalo_from_name)
+  end
+
+  def build_message
     # Preserve the real Zalo send timestamp so the chat history reads
     # in order. For live messages this equals wall clock; for historical
     # sync it is the actual time the sender said it in Zalo.
     sent_at = zalo_timestamp
+    outgoing = self_echo_outgoing?
 
     @message = @conversation.messages.build(
       content: message_display_content,
       account_id: inbox.account_id,
       inbox_id: inbox.id,
-      message_type: self_echo_outgoing? ? :outgoing : :incoming,
-      sender: @contact,
+      message_type: outgoing ? :outgoing : :incoming,
+      # No sender on outgoing: the author is the Zalo account, not a Chatwoot
+      # agent, and attributing it to @contact would credit the peer with the
+      # operator's own words.
+      sender: outgoing ? nil : @contact,
       source_id: zalo_msg_id.to_s,
-      content_attributes: extra_attrs,
+      content_attributes: message_content_attributes,
       created_at: sent_at,
       updated_at: sent_at
     )
@@ -135,9 +157,7 @@ class Zalo::IncomingMessageService
   # still want to display them but marked as outgoing to preserve the
   # real author.
   def self_echo_outgoing?
-    payload[:isSelf] == true || payload.dig(:data, :isSelf) == true || (payload[:historical] && payload.dig(:data, :uidFrom).to_s == own_id.to_s)
-  rescue StandardError
-    false
+    self_message? || (payload[:historical] && payload.dig(:data, :uidFrom).to_s == own_id.to_s)
   end
 
   def own_id

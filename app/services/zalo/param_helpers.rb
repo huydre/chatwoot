@@ -25,6 +25,13 @@ module Zalo::ParamHelpers
     payload.dig('data', 'uidFrom') || payload['uidFrom'] || payload['from']
   end
 
+  # True when the account itself is the author — either typed in the Zalo app
+  # or echoed back after Chatwoot sent it. zca-js only emits these because the
+  # client is created with `selfListen: true`.
+  def self_message?
+    payload['isSelf'] == true || payload.dig('data', 'isSelf') == true
+  end
+
   def zalo_from_name
     payload.dig('data', 'dName') || payload['dName'] || "Zalo User #{zalo_from_id.to_s.last(6)}"
   end
