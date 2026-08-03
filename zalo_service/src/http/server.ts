@@ -9,6 +9,7 @@ import { childLogger } from '../logger.js';
 import { authMiddleware } from './auth-middleware.js';
 import { healthRouter } from './routes/health-routes.js';
 import { loginRouter } from './routes/login-routes.js';
+import { sendRouter } from './routes/send-routes.js';
 import { sessionRouter } from './routes/session-routes.js';
 
 /**
@@ -69,10 +70,7 @@ export function createApp(): Application {
   app.use('/login', loginRouter);
   app.use('/session', sessionRouter);
 
-  // /send arrives in Phase 04 (Rails → Node outbound). Stub for now.
-  app.all('/send', (_req, res) => {
-    res.status(501).json({ error: 'not_implemented_phase_02' });
-  });
+  app.use('/send', sendRouter);
 
   app.use((_req, res) => res.status(404).json({ error: 'not_found' }));
   app.use(errorHandler);

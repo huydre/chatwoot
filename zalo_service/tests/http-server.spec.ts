@@ -48,15 +48,28 @@ describe('http server', () => {
     expect(res.status).toBe(401);
   });
 
-  it('passes auth with correct token (send stub still 501 in phase 02)', async () => {
+  // /send used to answer 501 not_implemented_phase_02 for everything. Getting
+  // past auth into request validation is what proves it is wired up now.
+  it('passes auth with correct token and validates the send body', async () => {
     const { createApp } = await import('../src/http/server.js');
     const app = createApp();
     const res = await request(app)
       .post('/send')
       .set('X-Zalo-Service-Token', TOKEN)
       .send({});
-    expect(res.status).toBe(501);
-    expect(res.body.error).toBe('not_implemented_phase_02');
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('invalid_request');
+  });
+
+  it('returns 404 from /send when the session is unknown', async () => {
+    const { createApp } = await import('../src/http/server.js');
+    const app = createApp();
+    const res = await request(app)
+      .post('/send')
+      .set('X-Zalo-Service-Token', TOKEN)
+      .send({ session_id: 'nope', thread_id: '123', content: 'hi' });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('session_not_found');
   });
 
   it('returns 404 for unknown routes', async () => {

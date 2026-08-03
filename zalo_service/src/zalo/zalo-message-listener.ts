@@ -9,13 +9,18 @@ import type { SessionContext } from '../sessions/session-context.js';
  *
  * Responsibilities:
  *   1. Subscribe to `message` events from zca-js
- *   2. Filter out echo messages (`isSelf`) to prevent infinite loops when an
- *      agent reply is broadcast back to us by Zalo
- *   3. Forward the raw message payload to Rails verbatim — all semantic
+ *   2. Forward the raw message payload to Rails verbatim — all semantic
  *      parsing (contact resolution, attachment download, dedup) lives in the
  *      Rails Zalo::IncomingMessageService where Chatwoot conventions apply
- *   4. On listener close/error, mark the context disconnected so the
+ *   3. On listener close/error, mark the context disconnected so the
  *      reconnect manager (Phase 06) can react
+ *
+ * Self messages are forwarded too. This used to drop them, to avoid looping
+ * on the echo of a reply sent from Chatwoot — but Zalo emits the same event
+ * for anything the user types in the Zalo app, so dropping them here meant
+ * the agent's own half of every conversation never existed as far as
+ * Chatwoot was concerned. Rails dedupes the echo by source_id instead, which
+ * distinguishes the two; this layer cannot.
  *
  * Phase 02 intentionally does not wire the full reconnect loop yet; that
  * arrives in phase-06-logout-detection-reconnect. Here we just surface the
@@ -45,8 +50,7 @@ export function attachMessageListener(ctx: SessionContext): void {
 
   api.listener.on('message', (rawMessage) => {
     try {
-      const msg = rawMessage as { isSelf?: boolean } & Record<string, unknown>;
-      if (msg.isSelf === true) return; // ignore our own sends
+      const msg = rawMessage as Record<string, unknown>;
 
       ctx.touchSeen();
 
