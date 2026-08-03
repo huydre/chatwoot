@@ -37,10 +37,6 @@ class Channel::Zalo < ApplicationRecord
     false
   end
 
-  def send_message(message)
-    Zalo::SendOnZaloService.new(message: message).perform
-  end
-
   def active_session?
     zalo_session&.status == 'ready'
   end

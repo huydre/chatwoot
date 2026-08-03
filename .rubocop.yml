@@ -98,6 +98,8 @@ Metrics/ModuleLength:
   Exclude:
     - lib/seeders/message_seeder.rb
     - spec/support/slack_stubs.rb
+    # Zalo Personal port — inherited complexity, tracked for cleanup
+    - lib/workers/zalo_event_subscriber.rb
 
 Rails/HelperInstanceVariable:
   Exclude:

@@ -17,7 +17,6 @@ class Zalo::IncomingMessageService
     @payload = payload.with_indifferent_access
     return if zalo_msg_id.blank?
     return if duplicate?
-    return if self_echo?
 
     set_contact
     set_conversation
@@ -29,16 +28,17 @@ class Zalo::IncomingMessageService
 
   attr_reader :payload
 
+  # Covers the echo of a message the agent sent from Chatwoot:
+  # SendOnZaloService writes the Zalo msgId onto that row as source_id, so by
+  # the time the echo arrives it is already known and gets dropped here.
+  #
+  # This used to be backed up by a self_echo? guard that skipped every live
+  # message the account sent — which also threw away everything the user typed
+  # in the Zalo app itself, so those never reached the agent's view. Dedup by
+  # id is the whole check; a self message that is not a duplicate is one sent
+  # from Zalo directly and belongs in the conversation as outgoing.
   def duplicate?
     inbox.messages.exists?(source_id: zalo_msg_id.to_s)
-  end
-
-  # Skip only for LIVE self echoes. Historical sync intentionally keeps
-  # self messages so they appear in the agent's history panel.
-  def self_echo?
-    return false if payload[:historical]
-
-    payload[:isSelf] == true || payload.dig(:data, :isSelf) == true
   end
 
   def set_contact

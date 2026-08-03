@@ -13,7 +13,12 @@ class Zalo::ProcessInboundMessageJob < ApplicationJob
     return unless channel.account&.active?
     return unless channel.inbox # inbox might have been deleted mid-flight
 
-    Zalo::IncomingMessageService.new(inbox: channel.inbox, payload: event['payload'] || {}).perform
+    # `historical` rides on the event, not inside payload, but the service
+    # reads it off the payload — so it never actually arrived and the
+    # historical branches were dead. Fold it in here.
+    payload = (event['payload'] || {}).merge('historical' => event['historical'] == true)
+
+    Zalo::IncomingMessageService.new(inbox: channel.inbox, payload: payload).perform
   rescue ActiveRecord::Encryption::Errors::Decryption => e
     # Corrupted cookies from a restored DB backup or mismatched keys.
     # Mark the session expired so the admin is prompted to re-scan QR.

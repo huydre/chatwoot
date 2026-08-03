@@ -16,6 +16,7 @@ module ZaloEventSubscriber
   BATCH_SIZE = 50
   # An event still unacked after this long means its consumer died mid-flight.
   CLAIM_IDLE_MS = 60_000
+  SELF_ECHO_DELAY = 2.seconds
 
   class << self
     def start
@@ -83,11 +84,32 @@ module ZaloEventSubscriber
       @consumer_name ||= "#{Socket.gethostname}-#{Process.pid}"
     end
 
+    # A message the account sends itself echoes back over the listener. If it
+    # came from Chatwoot, SendOnZaloService may still be writing the Zalo
+    # msgId onto that row, and dedup needs the id to already be there — so
+    # hold self messages briefly. Anything the user typed in the Zalo app has
+    # nothing to collide with and lands as an outgoing message.
+    # Mirrors the 2s wait the Facebook echo path uses.
+    def enqueue_inbound_message(event)
+      job = Zalo::ProcessInboundMessageJob
+      job = job.set(wait: SELF_ECHO_DELAY) if self_message?(event)
+      job.perform_later(event)
+    end
+
+    def self_message?(event)
+      return false if event['historical']
+
+      payload = event['payload']
+      return false unless payload.is_a?(Hash)
+
+      payload['isSelf'] == true || payload.dig('data', 'isSelf') == true
+    end
+
     def process_event(raw)
       event = JSON.parse(raw)
       case event['type']
       when 'message'
-        Zalo::ProcessInboundMessageJob.perform_later(event)
+        enqueue_inbound_message(event)
       when 'session_ready'
         Zalo::ConfirmSessionReadyJob.perform_later(event)
       when 'session_disconnected'
