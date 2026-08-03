@@ -16,6 +16,7 @@ Layout/LineLength:
 Metrics/ClassLength:
   Max: 175
   Exclude:
+    - 'app/controllers/api/v1/accounts/inboxes_controller.rb'
     - 'app/models/message.rb'
     - 'app/models/conversation.rb'
     - 'config/initializers/rack_attack.rb'
@@ -24,6 +25,11 @@ Metrics/MethodLength:
   Max: 19
   Exclude:
     - 'enterprise/lib/captain/agent.rb'
+    # Zalo Personal port — inherited complexity, tracked for cleanup
+    - 'app/controllers/internal/zalo_sessions_controller.rb'
+    - 'app/services/zalo/incoming_message_service.rb'
+    - 'app/services/zalo/send_on_zalo_service.rb'
+    - 'lib/workers/zalo_event_subscriber.rb'
 
 RSpec/ExampleLength:
   Max: 50
@@ -182,6 +188,46 @@ Metrics/AbcSize:
     - 'app/models/integrations/hook.rb'
     - 'app/models/canned_response.rb'
     - 'app/models/telegram_bot.rb'
+    # Zalo Personal port — inherited complexity, tracked for cleanup
+    - 'app/controllers/internal/zalo_sessions_controller.rb'
+    - 'app/services/zalo/send_on_zalo_service.rb'
+    - 'lib/workers/zalo_event_subscriber.rb'
+
+# Zalo Personal port — inherited complexity, tracked for cleanup.
+# These branch heavily on Zalo event/message shapes; splitting them is a
+# follow-up, not part of the port.
+Metrics/CyclomaticComplexity:
+  Exclude:
+    - 'app/jobs/zalo/process_inbound_message_job.rb'
+    - 'app/jobs/zalo/process_thread_list_item_job.rb'
+    - 'app/models/zalo_proxy.rb'
+    - 'app/services/zalo/param_helpers.rb'
+    - 'app/services/zalo/send_on_zalo_service.rb'
+    - 'lib/workers/zalo_event_subscriber.rb'
+
+Metrics/PerceivedComplexity:
+  Exclude:
+    - 'app/models/zalo_proxy.rb'
+    - 'app/services/zalo/send_on_zalo_service.rb'
+
+Metrics/ParameterLists:
+  Exclude:
+    - 'app/services/zalo/node_api_client.rb'
+
+Rails/SkipsModelValidations:
+  Exclude:
+    - 'app/jobs/zalo/process_inbound_message_job.rb'
+
+# The Redis subscriber runs as its own Procfile process; exiting is how it
+# signals the supervisor to restart it.
+Rails/Exit:
+  Exclude:
+    - 'lib/workers/zalo_event_subscriber.rb'
+
+RSpec/AnyInstance:
+  Exclude:
+    - 'spec/services/zalo/circuit_breaker_spec.rb'
+    - 'spec/services/zalo/rate_limiter_spec.rb'
 
 Rails/RenderInline:
   Exclude:

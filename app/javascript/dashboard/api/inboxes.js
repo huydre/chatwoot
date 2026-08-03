@@ -75,6 +75,33 @@ class Inboxes extends CacheEnabledApiClient {
       inbound_calls_enabled: enabled,
     });
   }
+
+  // ---- Zalo Personal channel (phase 05) -----------------------------------
+  // Note: these routes live under `namespace :channels` directly on the
+  // account (see config/routes.rb), NOT under the inboxes scope — so we
+  // build the URL from baseUrl() (which already includes the account
+  // prefix because this client is accountScoped) and bypass `this.url`
+  // (which would resolve to .../inboxes/... due to the Inboxes resource).
+
+  zaloBaseUrl() {
+    return `${this.baseUrl()}/channels/zalo`;
+  }
+
+  startZaloLogin(options = {}) {
+    return axios.post(`${this.zaloBaseUrl()}/login`, options);
+  }
+
+  getZaloLoginStatus(sessionId) {
+    return axios.get(`${this.zaloBaseUrl()}/login/${sessionId}`);
+  }
+
+  reloginZaloChannel(channelId) {
+    return axios.post(`${this.zaloBaseUrl()}/${channelId}/relogin`);
+  }
+
+  deleteZaloSession(sessionId) {
+    return axios.delete(`${this.zaloBaseUrl()}/${sessionId}`);
+  }
 }
 
 export default new Inboxes();

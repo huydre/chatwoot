@@ -142,6 +142,13 @@ Rails.application.routes.draw do
           resources :dashboard_apps, only: [:index, :show, :create, :update, :destroy]
           namespace :channels do
             resource :twilio_channel, only: [:create]
+            # Zalo Personal channel — QR login flow proxy to Node sidecar
+            post 'zalo/login', to: 'zalo#start_login'
+            get 'zalo/login/:session_id', to: 'zalo#login_status'
+            post 'zalo/:channel_id/relogin', to: 'zalo#relogin'
+            post 'zalo/:channel_id/sync', to: 'zalo#sync'
+            get 'zalo/:channel_id/sync/status', to: 'zalo#sync_status'
+            delete 'zalo/:session_id', to: 'zalo#destroy_session'
           end
           resources :conversations, only: [:index, :create, :show, :update, :destroy] do
             collection do
@@ -655,6 +662,16 @@ Rails.application.routes.draw do
   post 'webhooks/instagram', to: 'webhooks/instagram#events'
   post 'webhooks/tiktok', to: 'webhooks/tiktok#events'
   post 'webhooks/shopify', to: 'webhooks/shopify#events'
+
+  # ----------------------------------------------------------------------
+  # Internal API consumed by the Node zalo_service sidecar.
+  # Locked to localhost so external attackers can't reach it even with the
+  # shared token. The token check lives in the controller.
+  constraints(->(req) { %w[127.0.0.1 ::1].include?(req.remote_ip) }) do
+    namespace :internal do
+      resources :zalo_sessions, param: :session_id, only: %i[index show create update destroy]
+    end
+  end
 
   namespace :twitter do
     resource :callback, only: [:show]

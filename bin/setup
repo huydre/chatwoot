@@ -20,6 +20,11 @@ FileUtils.chdir APP_ROOT do
   # Install JavaScript dependencies
   # system('bin/yarn')
 
+  if File.exist?('zalo_service/package.json')
+    puts "\n== Installing zalo_service (Node.js sidecar) =="
+    system!('cd zalo_service && pnpm install && pnpm build')
+  end
+
   # puts "\n== Copying sample files =="
   # unless File.exist?('config/database.yml')
   #   FileUtils.cp 'config/database.yml.sample', 'config/database.yml'
